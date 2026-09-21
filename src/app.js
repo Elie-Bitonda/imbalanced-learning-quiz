@@ -7,6 +7,7 @@ import {
   LEVEL_LABELS,
   modeFromQuery,
   questionsForMode,
+  levelUrl,
 } from "./data/difficulty.js";
 import { studyLevelSelector } from "./ui/level-selector.js";
 import { openEditor } from "./ui/editor.js";
@@ -42,6 +43,107 @@ const sessions = new Map(
   STUDY_MODES.map((mode) => [mode, new StudySession(mode)]),
 );
 const manager = new QuestionManager(repository, () => render());
+const DEFAULT_RELEASE_STATE = Object.freeze({
+  mixed: true,
+  beginner: true,
+  medium: true,
+  pro: true,
+});
+const RELEASE_ORDER = /** @type {import('./models').StudyMode[]} */ ([
+  "beginner",
+  "medium",
+  "pro",
+  "mixed",
+]);
+let releaseState = { ...DEFAULT_RELEASE_STATE };
+let releaseControlsReady = config.mode === "local";
+
+async function refreshReleaseState() {
+  if (!client) return;
+  const { data, error } = await client.rpc("read_study_level_releases");
+  if (error) {
+    if (
+      error.code === "PGRST202" ||
+      error.message.includes("read_study_level_releases")
+    ) {
+      releaseControlsReady = false;
+      releaseState = { ...DEFAULT_RELEASE_STATE };
+      return;
+    }
+    throw new Error(error.message);
+  }
+  if (!data || typeof data !== "object")
+    throw new Error("The presentation release state is invalid.");
+  releaseControlsReady = true;
+  releaseState = { ...DEFAULT_RELEASE_STATE, ...data };
+}
+
+async function setRelease(level, released) {
+  if (!client || !auth?.canEdit)
+    throw new Error("Editor access is required to release study levels.");
+  const { data, error } = await client.rpc("set_study_level_release", {
+    target_level: level,
+    new_released: released,
+  });
+  if (error) throw new Error(error.message);
+  if (!data || typeof data !== "object")
+    throw new Error("The presentation release state is invalid.");
+  releaseControlsReady = true;
+  releaseState = { ...DEFAULT_RELEASE_STATE, ...data };
+}
+
+function renderReleaseControls(root) {
+  const panel = document.createElement("section");
+  panel.className = "release-panel";
+  if (!releaseControlsReady) {
+    panel.innerHTML =
+      '<div class="release-panel-heading"><div><div class="eyebrow">PRESENTATION ACCESS</div><h2>Level release controls</h2><p>Run the level-release migration in Supabase to enable presentation locks.</p></div></div>';
+    root.prepend(panel);
+    return;
+  }
+  panel.innerHTML = `<div class="release-panel-heading"><div><div class="eyebrow">PRESENTATION ACCESS</div><h2>Release levels when each section is complete</h2><p>Learner pages check for changes every 15 seconds. Editors can preview locked levels.</p></div></div><div class="release-grid">${RELEASE_ORDER.map(
+    (level) => {
+      const released = releaseState[level] === true;
+      return `<article class="release-card"><div><strong>${LEVEL_LABELS[level]}</strong><span class="release-status ${released ? "released" : "locked"}">${released ? "Available to learners" : "Locked"}</span></div><div class="release-actions"><button class="button ${released ? "ghost" : "primary"}" data-release-level="${level}" data-release-value="${released ? "false" : "true"}">${released ? "Lock" : "Release"}</button><button class="button secondary" data-copy-level="${level}">Copy link</button></div></article>`;
+    },
+  ).join("")}</div>`;
+  panel.querySelectorAll("[data-release-level]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const node = /** @type {HTMLElement} */ (button);
+      const level = /** @type {import('./models').StudyMode} */ (
+        node.dataset.releaseLevel
+      );
+      const released = node.dataset.releaseValue === "true";
+      panel.setAttribute("aria-busy", "true");
+      try {
+        await setRelease(level, released);
+        render();
+        notify(
+          `${LEVEL_LABELS[level]} is now ${released ? "available to learners" : "locked"}.`,
+        );
+      } catch (error) {
+        notify(message(error));
+      } finally {
+        panel.removeAttribute("aria-busy");
+      }
+    });
+  });
+  panel.querySelectorAll("[data-copy-level]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const level = /** @type {import('./models').StudyMode} */ (
+        /** @type {HTMLElement} */ (button).dataset.copyLevel
+      );
+      const url = new URL(levelUrl(level), location.origin).href;
+      try {
+        await navigator.clipboard.writeText(url);
+        notify(`${LEVEL_LABELS[level]} link copied.`);
+      } catch {
+        notify(`Copy this link: ${url}`);
+      }
+    });
+  });
+  root.prepend(panel);
+}
 
 function render() {
   const manage =
@@ -106,6 +208,7 @@ function render() {
     } else if (manage) {
       manager.render(main, mode);
       if (shared) {
+        renderReleaseControls(main);
         el(".storage-note", main).innerHTML =
           "Saved to the shared database. Open pages check for changes every 15 seconds.";
         const tools = document.createElement("div");
@@ -121,7 +224,18 @@ function render() {
       const studyMode = /** @type {import('./models').StudyMode} */ (mode);
       const questions = repository.list();
       const filtered = questionsForMode(questions, studyMode);
-      main.innerHTML = `${studyLevelSelector(questions, studyMode)}${canEdit() && studyMode !== "mixed" && filtered.length ? `<div class="level-study-actions"><span>${LEVEL_LABELS[studyMode]} Questions</span><button class="button secondary" id="add-level-question">${icon("plus")} Add ${LEVEL_LABELS[studyMode]} Question</button></div>` : ""}<div id="study-session"></div>`;
+      const released = releaseState[studyMode] !== false;
+      const selector = studyLevelSelector(
+        questions,
+        studyMode,
+        releaseState,
+        canEdit(),
+      );
+      if (!released && !canEdit()) {
+        main.innerHTML = `${selector}<section class="empty level-locked-message"><span class="empty-icon">${icon("shield")}</span><h1>${LEVEL_LABELS[studyMode]} is locked for now</h1><p>Your presenter will release this level when that part of the presentation is complete. This page checks automatically, so you can keep it open.</p></section>`;
+        return;
+      }
+      main.innerHTML = `${selector}${canEdit() && studyMode !== "mixed" && filtered.length ? `<div class="level-study-actions"><span>${LEVEL_LABELS[studyMode]} Questions</span><button class="button secondary" id="add-level-question">${icon("plus")} Add ${LEVEL_LABELS[studyMode]} Question</button></div>` : ""}<div id="study-session"></div>`;
       sessions.get(studyMode)?.render(el("#study-session", main), filtered);
       if (!canEdit()) {
         main.querySelector("#add-level-question")?.remove();
@@ -202,7 +316,7 @@ async function load() {
     return;
   }
   try {
-    await Promise.all([shared.refresh(), auth.refresh()]);
+    await Promise.all([shared.refresh(), auth.refresh(), refreshReleaseState()]);
     ready = true;
     loadError = "";
   } catch (error) {
@@ -224,9 +338,15 @@ async function poll() {
   polling = true;
   try {
     const before = shared.version,
-      wasEditor = auth.canEdit;
-    await Promise.all([shared.refresh(), auth.refresh()]);
-    if (before !== shared.version || wasEditor !== auth.canEdit) render();
+      wasEditor = auth.canEdit,
+      beforeReleases = JSON.stringify(releaseState);
+    await Promise.all([shared.refresh(), auth.refresh(), refreshReleaseState()]);
+    if (
+      before !== shared.version ||
+      wasEditor !== auth.canEdit ||
+      beforeReleases !== JSON.stringify(releaseState)
+    )
+      render();
   } catch {
     notify(
       "Could not check shared updates. Showing the last loaded bank; reconnect to get new changes.",
