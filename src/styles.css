@@ -1775,3 +1775,96 @@ input[type="checkbox"] {
     scroll-behavior: auto !important;
   }
 }
+
+
+/* Presentation release controls */
+.release-panel {
+  margin-bottom: 28px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+.release-panel-heading {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+.release-panel-heading h2 {
+  font-size: 18px;
+  margin-bottom: 6px;
+}
+.release-panel-heading p {
+  font-size: 12px;
+}
+.release-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+.release-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-muted);
+}
+.release-card strong {
+  display: block;
+  font-size: 13px;
+}
+.release-status,
+.level-release-state {
+  display: block;
+  margin-top: 5px;
+  font-size: 10px;
+  color: var(--text-secondary);
+}
+.release-status.released,
+.level-release-state.available {
+  color: var(--success);
+}
+.release-status.locked,
+.level-release-state.locked {
+  color: var(--danger);
+}
+.release-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px;
+}
+.level-option.locked {
+  cursor: not-allowed;
+  opacity: 0.58;
+  background: var(--surface-muted);
+}
+.level-option.editor-locked {
+  border-style: dashed;
+}
+.level-locked-message {
+  margin-top: 18px;
+}
+@media (max-width: 800px) {
+  .release-grid {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 540px) {
+  .release-panel {
+    padding: 16px;
+  }
+  .release-card {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .release-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
