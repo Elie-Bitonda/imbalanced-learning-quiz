@@ -7,12 +7,31 @@ import {
 } from "../data/difficulty.js";
 import { escape } from "./dom.js";
 
-/** @param {import('../models').Question[]} questions @param {import('../models').StudyMode} active */
-export function studyLevelSelector(questions, active) {
+/**
+ * @param {import('../models').Question[]} questions
+ * @param {import('../models').StudyMode} active
+ * @param {Record<import('../models').StudyMode, boolean>} [releases]
+ * @param {boolean} [editor]
+ */
+export function studyLevelSelector(
+  questions,
+  active,
+  releases = { mixed: true, beginner: true, medium: true, pro: true },
+  editor = false,
+) {
   return `<section class="level-selector" aria-labelledby="practice-level-heading"><div class="level-selector-heading"><h2 id="practice-level-heading">Choose your practice level</h2><span>${LEVEL_LABELS[active]} practice</span></div><nav class="level-options" aria-label="Study level">${STUDY_MODES.map(
     (mode) => {
       const count = questionsForMode(questions, mode).length;
-      return `<a href="${levelUrl(mode)}" class="level-option ${active === mode ? "active" : ""}" ${active === mode ? 'aria-current="page"' : ""}><span class="level-option-title">${LEVEL_LABELS[mode]}<span class="level-count">${count}</span></span><span class="level-description">${MODE_DESCRIPTIONS[mode]}</span><span class="sr-only">${count} ${count === 1 ? "question" : "questions"}</span></a>`;
+      const released = releases[mode] !== false;
+      const state = released
+        ? '<span class="level-release-state available">Available</span>'
+        : editor
+          ? '<span class="level-release-state locked">Locked for learners</span>'
+          : '<span class="level-release-state locked">Locked</span>';
+      const body = `<span class="level-option-title">${LEVEL_LABELS[mode]}<span class="level-count">${count}</span></span><span class="level-description">${MODE_DESCRIPTIONS[mode]}</span>${state}<span class="sr-only">${count} ${count === 1 ? "question" : "questions"}</span>`;
+      if (!released && !editor)
+        return `<span class="level-option locked" aria-disabled="true">${body}</span>`;
+      return `<a href="${levelUrl(mode)}" class="level-option ${active === mode ? "active" : ""} ${released ? "" : "editor-locked"}" ${active === mode ? 'aria-current="page"' : ""}>${body}</a>`;
     },
   ).join("")}</nav></section>`;
 }
